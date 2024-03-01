@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Long Polling Client</title>
+</head>
+<body>
+    <div id="response-container"></div>
+
+    <script>
+        function longPoll() {
+            fetch('http://localhost:8080/poll') // Делаем запрос на сервер
+                .then(response => response.text()) // Получаем ответ от сервера в виде текста
+                .then(data => {
+                    console.log("Received from server:", data); // Выводим ответ в консоль
+                    // Добавляем ответ на страницу
+                    document.getElementById('response-container').innerHTML += '<p>' + data + '</p>';
+                    setTimeout(longPoll, 60000); // Запускаем лонг поллинг снова через 1 мин после получения ответа
+                })
+                .catch(error => {
+                    console.error('Error:', error); // Обработка ошибок
+                    setTimeout(longPoll, 60000); // В случае ошибки также продолжаем лонг поллинг через 1 мин
+                });
+        }
+
+        // Начинаем лонг поллинг
+        longPoll();
+    </script>
+</body>
+</html>
