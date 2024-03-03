@@ -1,15 +1,33 @@
 package lobbyservice
 
-import "sync"
+import (
+	"fmt"
+	"net/http"
+	"sync"
+)
 
 type Connection struct {
 	// Данные о соединении
-	Name string
+	Name    string
+	Writter *http.ResponseWriter
 }
 
 type ConnectionStack struct {
 	connections []Connection
 	mutex       sync.Mutex
+}
+
+func (cs *ConnectionStack) ObserveLobby(ls *Lobby) {
+	go func() {
+		for {
+			conn, ok := cs.Pop()
+			if ok {
+				fmt.Printf("sasageyuo %s \n", conn.Name)
+				ls.AddConnection(&conn)
+			}
+		}
+	}()
+
 }
 
 func (cs *ConnectionStack) Push(conn Connection) {
