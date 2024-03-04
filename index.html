@@ -9,6 +9,9 @@
     <input type="text" id="testInput" placeholder="Enter text">
     <button onclick="sendMessage()">Send</button>
     
+    <!-- Область для отображения сообщений -->
+    <div id="messageArea"></div>
+    
     <script> 
 
         function sendMessage() { 
@@ -21,6 +24,15 @@
                     authorization: inputValue
                 };
                 socket.send(JSON.stringify(authData)); // Отправляем данные аутентификации
+            };
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data); // Разбираем JSON-сообщение от сервера
+                console.log("Received message from server:", data);
+
+                // Обновляем содержимое области сообщений
+                const messageArea = document.getElementById("messageArea");
+                messageArea.innerHTML += "<p>" + JSON.stringify(data) + "</p>";
             };
 
             socket.onerror = function(error) {
