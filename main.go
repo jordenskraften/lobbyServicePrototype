@@ -1,78 +1,72 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
+	"log"
+	lobbyservice "longPoll/lobbyService"
 	"net/http"
 	"time"
 
-	"longPoll/lobbyservice"
-
-	"github.com/go-chi/chi"
+	"github.com/gorilla/websocket"
 )
 
-// -------------------------------
-func main() {
-	fmt.Println("service is started")
-
-	//есть пул подключений
-	//есть лобби которое берет кого-то из пула
-	//есть механизм который проверяет надо ли спавнить лобби или одобрить его когда оно заполнено
-
-	connectionStack := lobbyservice.ConnectionStack{}
-	lobby := lobbyservice.Lobby{
-		Ch: make(chan string),
-	}
-	connectionStack.ObserveLobby(&lobby)
-
-	//давай потестируем лобби
-	go lobbyTesting(&lobby)
-
-	for {
-
-	}
-	//для начала роутер на эндпоинт
-	r := chi.NewRouter()
-	r.Get("/poll", lobbyservice.PollHandler(&connectionStack))
-
-	http.ListenAndServe(":8080", r)
-
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }
 
-func lobbyTesting(lo *lobbyservice.Lobby) {
-	conn1 := &lobbyservice.Connection{
-		Name:    "111",
-		Writter: nil,
-	}
-	conn2 := &lobbyservice.Connection{
-		Name:    "222",
-		Writter: nil,
-	}
-	conn3 := &lobbyservice.Connection{
-		Name:    "333",
-		Writter: nil,
-	}
+type AuthorizationMessage struct {
+	Authorization string `json:"authorization"`
+}
 
-	fmt.Println("one conn")
-	lo.AddConnection(conn1)
-	time.Sleep(2 * time.Second)
-	lo.Ch <- conn1.Name
-	time.Sleep(6 * time.Second) // Пауза для обработки сообщения
-	fmt.Println("=======================")
+func handleWebSocket(lp *lobbyservice.LobbyPull) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println("Ошибка при обновлении соединения веб-сокета:", err)
+			return
+		}
+		defer conn.Close()
 
-	fmt.Println("two conn")
-	lo.AddConnection(conn2)
-	time.Sleep(2 * time.Second)
-	lo.Ch <- conn1.Name
-	lo.Ch <- conn2.Name
-	time.Sleep(6 * time.Second) // Пауза для обработки сообщений
-	fmt.Println("=======================")
+		// Читаем данные, отправленные клиентом сразу после открытия соединения
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("Ошибка чтения сообщения:", err)
+			return
+		}
+		log.Printf("Получены данные от клиента при открытии соединения: %s\n", message)
 
-	fmt.Println("three conn")
-	lo.AddConnection(conn3)
-	time.Sleep(2 * time.Second)
-	lo.Ch <- conn1.Name
-	lo.Ch <- conn2.Name
-	lo.Ch <- conn3.Name
-	time.Sleep(6 * time.Second) // Пауза для обработки сообщений
-	fmt.Println("=======================")
+		var authMessage AuthorizationMessage
+		err = json.Unmarshal([]byte(message), &authMessage)
+		if err != nil {
+			log.Println("Ошибка декодирования JSON:", err)
+			return
+		}
+
+		time.Sleep(1 * time.Second) // Отправляем пинг каждые 5 секунд
+		err = conn.WriteMessage(websocket.PingMessage, nil)
+		if err != nil {
+			log.Println("Ошибка отправки пинга:", err)
+			//окей эта хуйня пашет и проверяет дисконектнулся ли кто-то или нет
+			return
+		}
+		time.Sleep(1 * time.Second) // Отправляем пинг каждые 5 секунд
+
+		Connection := lobbyservice.Connection{
+			Name: authMessage.Authorization,
+			Conn: conn,
+		}
+		lp.AddConnectionToLobby(&Connection)
+	}
+}
+
+func main() {
+
+	lobbyPull := lobbyservice.NewLobbyPull()
+
+	http.HandleFunc("/ws", handleWebSocket(lobbyPull))
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

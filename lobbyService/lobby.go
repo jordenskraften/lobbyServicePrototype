@@ -1,41 +1,87 @@
 package lobbyservice
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"time"
+
+	"github.com/gorilla/websocket"
 )
 
+type Connection struct {
+	Name string
+	Conn *websocket.Conn
+}
+
 type LobbyPull struct {
-	lobbies map[string]*Lobby
+	lobbies []*Lobby
 	mutex   sync.Mutex
+}
+
+func NewLobbyPull() *LobbyPull {
+	return &LobbyPull{
+		lobbies: make([]*Lobby, 0),
+		mutex:   sync.Mutex{},
+	}
+}
+
+func (lp *LobbyPull) CreateLobby() *Lobby {
+	newLobby := &Lobby{
+		filled:      false,
+		mutex:       sync.Mutex{},
+		Connections: make([]*Connection, 0, 5),
+	}
+	lp.lobbies = append(lp.lobbies, newLobby)
+	return newLobby
+
+}
+
+func (lp *LobbyPull) AddConnectionToLobby(conn *Connection) {
+	lp.mutex.Lock()
+	defer lp.mutex.Unlock()
+
+	var freeLobby *Lobby
+
+	if len(lp.lobbies) == 0 {
+		freeLobby = lp.CreateLobby()
+		fmt.Println("creating first lobby in lobby pull")
+	} else {
+		for _, lobby := range lp.lobbies {
+			if lobby.IsFilled() == false {
+				freeLobby = lobby
+				fmt.Println("found free lobby in lobby pull")
+			}
+		}
+		if freeLobby == nil {
+			freeLobby = lp.CreateLobby()
+			fmt.Println("no free lobby in lobby pull, creating new")
+		}
+	}
+	freeLobby.AddConnection(conn)
+	fmt.Println(lp.lobbies)
 }
 
 type Lobby struct {
 	filled      bool
 	mutex       sync.Mutex
-	LobbyId     string
-	Ch          chan string
-	Connections map[string]*Connection
+	Connections []*Connection
 }
 
-const (
-	leaversTimer = time.Second * 3
-)
+//думаю дать лобби метод который запустит горутину с тикером и кансел контекстом
+//эта горутина будет пинговать плееров в лобби и в целом "жить"
 
 func (lo *Lobby) AddConnection(conn *Connection) {
 	lo.mutex.Lock()
 	defer lo.mutex.Unlock()
 
 	if lo.Connections == nil {
-		lo.Connections = make(map[string]*Connection)
+		lo.Connections = make([]*Connection, 0, 5)
 	}
 
-	lo.Connections[conn.Name] = conn
+	lo.Connections = append(lo.Connections, conn)
 	fmt.Printf("len %d \n", len(lo.Connections))
 
 	if len(lo.Connections) == 5 {
+		lo.filled = true
 		fmt.Println("lobby is done")
 		// Очистка структуры после написания "done"
 	}
@@ -52,52 +98,10 @@ func (lo *Lobby) NoticePlayers(message string) {
 	for _, a := range lo.Connections {
 		fmt.Println("noticed player", a.Name)
 	}
-
-	go lo.LeaversCheck()
 }
 
 // лобби должно уметь дожидаться реконект игроков после месейджа
 func (lo *Lobby) LeaversCheck() {
-	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, leaversTimer)
-	defer cancel()
-
-	survivors := make(map[string]bool)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Println("done ctx")
-				return
-			case str := <-lo.Ch:
-				fmt.Println("got chan msg", str)
-				survivors[str] = true
-			default:
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	prevLen := len(lo.Connections)
-
-	lo.mutex.Lock()
-	for connID := range lo.Connections {
-		if _, exists := survivors[connID]; !exists {
-			fmt.Println("not found in survivors", connID)
-			delete(lo.Connections, connID)
-		}
-	}
-	lo.mutex.Unlock()
-
-	newLen := len(lo.Connections)
-
-	fmt.Printf("prev len %d, new len %d \n", prevLen, newLen)
 }
 
 //

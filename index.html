@@ -3,29 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Long Polling Client</title>
+    <title>WebSocket Client</title>
 </head>
 <body>
-    <div id="response-container"></div>
+    <input type="text" id="testInput" placeholder="Enter text">
+    <button onclick="sendMessage()">Send</button>
+    
+    <script> 
 
-    <script>
-        function longPoll() {
-            fetch('http://localhost:8080/poll') // Делаем запрос на сервер
-                .then(response => response.text()) // Получаем ответ от сервера в виде текста
-                .then(data => {
-                    console.log("Received from server:", data); // Выводим ответ в консоль
-                    // Добавляем ответ на страницу
-                    document.getElementById('response-container').innerHTML += '<p>' + data + '</p>';
-                    setTimeout(longPoll, 60000); // Запускаем лонг поллинг снова через 1 мин после получения ответа
-                })
-                .catch(error => {
-                    console.error('Error:', error); // Обработка ошибок
-                    setTimeout(longPoll, 60000); // В случае ошибки также продолжаем лонг поллинг через 1 мин
-                });
+        function sendMessage() { 
+            const socket = new WebSocket("ws://localhost:8080/ws");
+
+            socket.onopen = function(event) {
+                console.log("WebSocket connection established.");
+                const inputValue = document.getElementById("testInput").value;
+                const authData = {
+                    authorization: inputValue
+                };
+                socket.send(JSON.stringify(authData)); // Отправляем данные аутентификации
+            };
+
+            socket.onerror = function(error) {
+                console.error("WebSocket error:", error);
+            };
+
+            // Проверка понга от сервера
+            socket.onpong = function(event) {
+                console.log("Получен понг от сервера");
+            };
         }
-
-        // Начинаем лонг поллинг
-        longPoll();
     </script>
 </body>
 </html>
