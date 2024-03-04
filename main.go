@@ -5,7 +5,6 @@ import (
 	"log"
 	lobbyservice "longPoll/lobbyService"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -29,7 +28,7 @@ func handleWebSocket(lp *lobbyservice.LobbyPull) http.HandlerFunc {
 			log.Println("Ошибка при обновлении соединения веб-сокета:", err)
 			return
 		}
-		defer conn.Close()
+		//defer conn.Close()
 
 		// Читаем данные, отправленные клиентом сразу после открытия соединения
 		_, message, err := conn.ReadMessage()
@@ -46,19 +45,18 @@ func handleWebSocket(lp *lobbyservice.LobbyPull) http.HandlerFunc {
 			return
 		}
 
-		time.Sleep(1 * time.Second) // Отправляем пинг каждые 5 секунд
+		//пингуем раз конекшн что он не отключился
 		err = conn.WriteMessage(websocket.PingMessage, nil)
 		if err != nil {
 			log.Println("Ошибка отправки пинга:", err)
-			//окей эта хуйня пашет и проверяет дисконектнулся ли кто-то или нет
 			return
 		}
-		time.Sleep(1 * time.Second) // Отправляем пинг каждые 5 секунд
 
 		Connection := lobbyservice.Connection{
 			Name: authMessage.Authorization,
 			Conn: conn,
 		}
+
 		lp.AddConnectionToLobby(&Connection)
 	}
 }

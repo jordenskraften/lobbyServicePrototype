@@ -1,8 +1,11 @@
 package lobbyservice
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -12,6 +15,7 @@ type Connection struct {
 	Conn *websocket.Conn
 }
 
+// =================================
 type LobbyPull struct {
 	lobbies []*Lobby
 	mutex   sync.Mutex
@@ -31,6 +35,8 @@ func (lp *LobbyPull) CreateLobby() *Lobby {
 		Connections: make([]*Connection, 0, 5),
 	}
 	lp.lobbies = append(lp.lobbies, newLobby)
+
+	go newLobby.LifeCycle()
 	return newLobby
 
 }
@@ -60,9 +66,11 @@ func (lp *LobbyPull) AddConnectionToLobby(conn *Connection) {
 	fmt.Println(lp.lobbies)
 }
 
+// ==========================================================
 type Lobby struct {
 	filled      bool
 	mutex       sync.Mutex
+	counter     int
 	Connections []*Connection
 }
 
@@ -77,16 +85,76 @@ func (lo *Lobby) AddConnection(conn *Connection) {
 		lo.Connections = make([]*Connection, 0, 5)
 	}
 
+	//на случай если он уже был там
+	for i, curConn := range lo.Connections {
+		if conn.Name == curConn.Name {
+			lo.Connections = append(lo.Connections[:i], lo.Connections[i+1:]...)
+			curConn.Conn.Close()
+			break
+		}
+	}
+	//а теперь добавляем в слайс новый конект
 	lo.Connections = append(lo.Connections, conn)
-	fmt.Printf("len %d \n", len(lo.Connections))
+	log.Printf("len of lobby %d is %d \n", &lo, len(lo.Connections))
 
 	if len(lo.Connections) == 5 {
 		lo.filled = true
-		fmt.Println("lobby is done")
+		lo.counter = 5
+		log.Println("lobby is filled, starting 5 seconds count")
 		// Очистка структуры после написания "done"
 	}
 
 	lo.NoticePlayers("updated count players")
+}
+
+func (lo *Lobby) LifeCycle() {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	ticker := time.NewTicker(time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			for _, lobbyConnection := range lo.Connections {
+				err := lobbyConnection.Conn.WriteMessage(websocket.PingMessage, nil)
+				if err != nil {
+					log.Printf("Юзер %s не пингуется сервером и дропнут из лобби %d \n", lobbyConnection.Name, &lo)
+					lo.RemoveConnection(lobbyConnection)
+				}
+			}
+			if len(lo.Connections) < 5 && lo.filled {
+				log.Printf("лобби %d было полное и вело 5 сек отсчет, но кто-то отвалился \n", &lo)
+				lo.filled = false
+			}
+			if lo.filled {
+				log.Printf("counter in lobby %d is succesfull %d \n", &lo, lo.counter)
+				lo.counter -= 1
+				if lo.counter < 0 {
+					log.Printf("counter in lobby %d is completed! \n", &lo)
+					cancel()
+				}
+			}
+		case <-ctx.Done():
+			log.Printf("context in lobby %d is done! \n", &lo)
+			return
+		default:
+
+		}
+	}
+}
+
+func (lo *Lobby) RemoveConnection(conn *Connection) {
+	lo.mutex.Lock()
+	defer lo.mutex.Unlock()
+
+	for i, curConn := range lo.Connections {
+		if conn.Name == curConn.Name {
+			lo.Connections = append(lo.Connections[:i], lo.Connections[i+1:]...)
+			curConn.Conn.Close()
+			break
+		}
+	}
 }
 
 func (lo *Lobby) IsFilled() bool {
